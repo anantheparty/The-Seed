@@ -1,6 +1,9 @@
 from __future__ import annotations
 from typing import Dict, List, Any
 from .protocol import ActionSpec
+from ..utils.log_manager import LogManager
+
+logger = LogManager.get_logger()
 
 class ActionRegistry:
     """注册动作（由游戏侧注入实现），同时暴露给模型一个统一的工具 schema。"""
@@ -12,6 +15,7 @@ class ActionRegistry:
         if spec.name in self._actions:
             raise ValueError(f"Action already registered: {spec.name}")
         self._actions[spec.name] = spec
+        logger.info("注册动作：%s (%s)", spec.name, spec.desc)
 
     def get(self, name: str) -> ActionSpec:
         return self._actions[name]
@@ -35,4 +39,5 @@ class ActionRegistry:
                     "required": [p.name for p in spec.params if p.required]
                 }
             })
+        logger.debug("导出工具 schema，数量=%s", len(tools))
         return tools
