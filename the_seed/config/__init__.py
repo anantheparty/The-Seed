@@ -2,10 +2,10 @@ from .manager import load_config, CONFIG_PATH
 from .schema import (
     SeedConfig,
     LoggingSection,
-    OpenAISection,
-    PlannerSection,
-    AgentSection,
+    ModelConfig,
     RuntimeSection,
+    ConsoleSection,
+    NodeModel,
 )
 
 __all__ = [
@@ -13,9 +13,9 @@ __all__ = [
     "CONFIG_PATH",
     "SeedConfig",
     "LoggingSection",
-    "OpenAISection",
-    "PlannerSection",
-    "AgentSection",
+    "ModelConfig",
     "RuntimeSection",
+    "ConsoleSection",
+    "NodeModel",
 ]
 
