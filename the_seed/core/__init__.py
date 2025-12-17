@@ -9,6 +9,7 @@ from .node import (
     ActionGenNode,
     BaseNode,
     CommitNode,
+    NeedUserNode,
     NodeOutput,
     ObserveNode,
     PlanNode,
@@ -28,5 +29,6 @@ __all__ = [
     "ActionGenNode",
     "ReviewNode",
     "CommitNode",
+    "NeedUserNode",
 ]
 

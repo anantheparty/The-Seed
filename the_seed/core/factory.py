@@ -12,6 +12,7 @@ from .node import (
     ActionGenNode,
     BaseNode,
     CommitNode,
+    NeedUserNode,
     ObserveNode,
     PlanNode,
     ReviewNode,
@@ -40,6 +41,7 @@ class NodeFactory:
         FSMState.ACTION_GEN: "action_gen",
         FSMState.REVIEW: "review",
         FSMState.COMMIT: "commit",
+        FSMState.NEED_USER: "need_user",
     }
 
     def __init__(self, cfg: SeedConfig | None = None):
@@ -76,11 +78,12 @@ class NodeFactory:
             "review": self._build_model_adapters("review", self.cfg.node_models.review),
             "commit": self._build_model_adapters("commit", self.cfg.node_models.commit),
         }
-        
+
         return {
             "observe": ObserveNode(model_adapters["observe"]),
             "plan": PlanNode(model_adapters["plan"]),
             "action_gen": ActionGenNode(model_adapters["action_gen"]),
             "review": ReviewNode(model_adapters["review"]),
             "commit": CommitNode(model_adapters["commit"]),
+            "need_user": NeedUserNode(),
         }

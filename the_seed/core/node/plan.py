@@ -39,7 +39,7 @@ class PlanNode(BaseNode):
         })
 
         resp = self._complete(system=p.system, user=user, metadata={"node": self.node_key})
-        logger.debug("PlanNode: response=%r", resp.text)
+        logger.info("PlanNode: response=%r", resp.text)
         data: Dict[str, Any]
         try:
             data = json.loads(resp.text)
@@ -48,7 +48,7 @@ class PlanNode(BaseNode):
             data = {"plan_level": 1, "plan": [], "next": None, "why": "invalid_json", "assumptions": []}
 
         plan = data.get("plan", []) or []
-        logger.debug("PlanNode: Set Plan To bb.plan=%r", plan)
+        logger.info("PlanNode: Set Plan To bb.plan=%r", plan)
         bb.plan = plan
         bb.step_index = 0
         bb.current_step = plan[0] if plan else {}

@@ -4,7 +4,6 @@ from typing import Any, Dict
 
 from ...utils import LogManager
 from ..fsm import FSM, FSMState
-from ..prompt import get_prompt
 from .base import BaseNode, NodeOutput
 
 logger = LogManager.get_logger()
@@ -37,17 +36,14 @@ class ReviewNode(BaseNode):
             logger.warning("ReviewNode: missing python. Back to ACTION_GEN.")
             return NodeOutput(next_state=FSMState.ACTION_GEN.value, payload={})
 
-        prompt = get_prompt(self.node_key)
-        user = prompt.build_user({
+        user_payload = {
             "goal": fsm.ctx.goal,
             "step": current_step,
             "action_code": last_code,
             "action_result": bb.action_result,
             "scratchpad": bb.scratchpad,
-        })
-        resp = self._complete(system=prompt.system, user=user, metadata={"node": self.node_key})
-        logger.debug("ReviewNode: response=\n```\n%s\n```", resp.text)
-        patched_code = (resp.text or "").strip()
+        }
+        patched_code = self._complete_python_script(fsm, prompt_key=self.node_key, payload=user_payload)
 
         if not patched_code:
             logger.error("ReviewNode: model returned empty python.")
@@ -59,15 +55,10 @@ class ReviewNode(BaseNode):
             logger.warning("ReviewNode: patched python failed local precheck.")
             return NodeOutput(next_state=FSMState.PLAN.value, payload={"review": bb.review})
 
-        bb.python_script = patched_code
-        exec_result = self._execute_code(patched_code, fsm)
-        bb.update_from_result(exec_result)
+        exec_result = self._run_python(fsm, script=patched_code, record_attr="python_script", log_prefix="ReviewNode")
 
         next_state = self._map_next_state(exec_result.next_state, error=exec_result.error is not None)
-        payload = {
-            "python": patched_code,
-            "execution": exec_result.to_dict(),
-        }
+        payload = self._standard_execution_payload(patched_code, exec_result)
         return NodeOutput(next_state=next_state, payload=payload)
 
     def _build_scratchpad(self, step: Dict[str, Any], exec_result) -> str:

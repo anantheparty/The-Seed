@@ -5,7 +5,6 @@ from typing import Any, Dict
 
 from ...utils import LogManager
 from ..fsm import FSM, FSMState
-from ..prompt import get_prompt
 from .base import BaseNode, NodeOutput
 
 logger = LogManager.get_logger()
@@ -30,19 +29,14 @@ class ObserveNode(BaseNode):
         bb.intel = intel
 
         # 2) 让 LLM 决定是否需要“更深观察请求”（外环主线先把请求列出来）
-        p = get_prompt(self.node_key)
-        user = p.build_user({
+        user_payload = {
             "goal": fsm.ctx.goal,
             "last_outcome": bb.last_outcome,
             "intel": bb.intel,
             "game_basic_state": bb.game_basic_state,
             "game_detail_state": bb.game_detail_state,
-        })
-        resp = self._complete(system=p.system, user=user, metadata={"node": self.node_key})
-        logger.debug("ObserveNode: response=\n```\n%s\n```", resp.text)
-        python_script = (resp.text or "").strip()
-        exec_result = self._execute_code(python_script, fsm)
-        logger.debug("ObserveNode: execution result=%r", exec_result)
-        bb.update_from_result(exec_result)
+        }
+        python_script = self._complete_python_script(fsm, prompt_key=self.node_key, payload=user_payload)
+        exec_result = self._run_python(fsm, script=python_script, record_attr=None, log_prefix="ObserveNode")
         
         return NodeOutput(next_state=FSMState.PLAN.value, payload={"observe": exec_result.to_dict()})

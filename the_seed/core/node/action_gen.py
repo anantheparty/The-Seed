@@ -5,7 +5,6 @@ from typing import Any, Dict
 from ...utils import LogManager
 from ..blackboard import Blackboard
 from ..fsm import FSM, FSMState
-from ..prompt import get_prompt
 from .base import BaseNode, NodeOutput
 
 logger = LogManager.get_logger()
@@ -24,10 +23,9 @@ class ActionGenNode(BaseNode):
         if not step:
             logger.warning("ActionGenNode: no current_step. Going back to PLAN.")
             return NodeOutput(next_state=FSMState.PLAN.value, payload={})
-        logger.debug("ActionGenNode: current step=%r", step)
+        logger.info("ActionGenNode: current step=%r", step)
 
-        prompt = get_prompt(self.node_key)
-        user = prompt.build_user({
+        user_payload = {
             "goal": fsm.ctx.goal,
             "step": step,
             "intel": bb.intel,
@@ -35,28 +33,17 @@ class ActionGenNode(BaseNode):
             "rt_contract": self._rt_contract(bb),
             "game_basic_state": bb.game_basic_state,
             "game_detail_state": bb.game_detail_state,
-        })
-
-        resp = self._complete(system=prompt.system, user=user, metadata={"node": self.node_key})
-        logger.debug("ActionGenNode: response=\n```\n%s\n```", resp.text)
-        python_script = (resp.text or "").strip()
+        }
+        python_script = self._complete_python_script(fsm, prompt_key=self.node_key, payload=user_payload)
 
         if not python_script:
             logger.warning("ActionGenNode: empty python from model. Back to PLAN.")
             return NodeOutput(next_state=FSMState.PLAN.value, payload={"error": "empty_python"})
 
-        bb.python_script = python_script
-        logger.info("ActionGenNode: python length=%d", len(python_script))
-        exec_result = self._execute_code(python_script, fsm)
-        logger.debug("ActionGenNode: execution result=%r", exec_result)
-        bb.update_from_result(exec_result)
+        exec_result = self._run_python(fsm, script=python_script, record_attr="python_script", log_prefix="ActionGenNode")
 
-        next_state = exec_result.next_state
-        payload: Dict[str, Any] = {
-            "python": python_script,
-            "execution": exec_result.to_dict(),
-        }
-        return NodeOutput(next_state=next_state, payload=payload)
+        payload = self._standard_execution_payload(python_script, exec_result)
+        return NodeOutput(next_state=exec_result.next_state, payload=payload)
 
 
    

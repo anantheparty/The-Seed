@@ -39,7 +39,8 @@ class Blackboard:
     
     gameapi: Any = None
     gameapi_rules: str = ""
-
+    runtime_globals: Dict[str, Any] = field(default_factory=dict)
+    
     def update_from_result(self, result: ExecutionResult):
         self.last_outcome = result.to_dict()
         self.scratchpad += self._build_scratchpad(result)

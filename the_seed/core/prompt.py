@@ -24,61 +24,55 @@ def _json_only_rule() -> str:
 def _python_only_rule() -> str:
     
     return """
+You must output RAW PYTHON CODE ONLY.
+NO markdown fences like ``` or ```python. NO explanation text.
 
-You must output RAW PYTHON CODE ONLY. No explanation text.
-If you output anything other than Python code, the program will crash.
+Only call methods that appear in [Runtime Contract] in the user prompt.
+NEVER invent new methods (e.g. wait_for_deployment) or new classes.
 
-Your job:
-- Implement the given step intent robustly using the provided runtime objects.
-- You MAY perform multiple gameapi calls and conditional branches.
-- You MAY choose to do no execution and only return a decision by assigning __result__.
+Actor identity:
+- Use actor.actor_id as the primary identifier.
+- actor.id may exist only for backward compatibility. Always prefer actor.actor_id.
 
-Runtime objects available (predefined globals):
-- gameapi: game control/query API (see contract in user prompt)
-- logger: logger object for logging(use logger.debug|info|warning|error(message) to log information)
+Review rules (when fixing):
+- You MUST change the code to address the specific error. DO NOT repeat the same failing line.
+- If the error is "attribute ... not found", switch to a safe getter pattern:
+    aid = getattr(actor, "actor_id", None) or getattr(actor, "id", None)
+- If the step is already satisfied by game state, return success without performing actions.
 
 Hard safety rules:
 - DO NOT import anything.
 - DO NOT do file I/O, network, subprocess, threads, reflection, eval/exec.
-- DO NOT access globals() / locals() to escape the sandbox.
-- Keep loops BOUNDED (no unbounded while True). Respect budgets.
+- DO NOT access globals() / locals().
+- Keep loops bounded.
 
-You MUST set __result__ exactly once at the end of the script.
-__result__ MUST be a dict with EXACT keys:
+You MUST set __result__ exactly once at the end.
+__result__ MUST be a dict with keys:
 {
-  "next_state": "RUN|OBSERVE|PLAN|REVIEW|COMMIT|STOP",
+  "next_state": "RUN|OBSERVE|PLAN|REVIEW|COMMIT|NEED_USER|STOP",
   "player_message": str,
-  "observations": str,p
-  "next_step_hint": str     # {intent, skill, args} or {}
+  "observations": str,
+  "next_step_hint": str
 }
-
-Semantics:
-- next_state: the next state of the node
-- player_message: the message to the player
-- observations: the information gotten from action execution, which may be used by next node
-- next_step_hint: some extra information may be used by next node
-
-You should prefer:
-- short messages to player
-- bounded self-repair only when safe and low-risk
-- otherwise escalate via observe/replan/need_user
-
+next_step_hint MUST be a JSON string or "" (not a python dict).
 """
 
 
 # -----------------------------
 # Observe Node Prompts
 # -----------------------------
-OBSERVE_SYSTEM = (
-    f"""
-You are the OBSERVE node in an agent workflow.
-Your goal is to decide what minimal additional information is required before planning.
-You do NOT execute actions.
-You do NOT propose long plans.
+OBSERVE_SYSTEM = f"""
+You are the OBSERVE node.
+You MAY call gameapi query methods only (no actions like move/produce/deploy/attack).
+Your job is to decide whether we have enough info to PLAN.
+
+Output python only. No fences.
+
+If enough info:
+- next_state must be "PLAN"
+
 {_python_only_rule()}
 """
-)
-
 
 def build_observe_user(p: Dict[str, Any]) -> str:
     # p keys expected: goal, last_outcome, intel
@@ -204,6 +198,8 @@ def build_actiongen_user(p: Dict[str, Any]) -> str:
 
 [Budgets / Policy]
 - if missing info blocks safe execution: return status="observe" with 0~3 hints
+- prefer querying units safely: check list length before indexing, and escalate to NEED_USER when the game state requires manual input
+- when referencing unit identifiers, use actor.actor_id (actor.id 仍旧可用，但仅作兼容)
 
 [GameBasicState]
 {p.get('game_basic_state','')}
@@ -213,6 +209,7 @@ def build_actiongen_user(p: Dict[str, Any]) -> str:
 
 Task:
 Generate an Action Program in python that attempts the current step intent robustly.
+- Validate preconditions before acting; if无法安全执行，请设置 next_state="NEED_USER" 并简要说明原因。
 If you choose to not execute any action, return a "decision-only" program by directly assigning __result__.
 Remember: output python code only, and end by setting __result__ exactly once.
 """

@@ -1,4 +1,4 @@
-from .manager import load_config, CONFIG_PATH
+from .manager import load_config
 from .schema import (
     SeedConfig,
     LoggingSection,
@@ -10,7 +10,6 @@ from .schema import (
 
 __all__ = [
     "load_config",
-    "CONFIG_PATH",
     "SeedConfig",
     "LoggingSection",
     "ModelConfig",

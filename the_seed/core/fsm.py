@@ -17,6 +17,7 @@ class FSMState(str, Enum):
     ACTION_GEN = "action_gen"
     REVIEW = "review"
     COMMIT = "commit"
+    NEED_USER = "need_user"
     STOP = "stop"
     DONE = "done"
 
@@ -44,18 +45,22 @@ class FSM:
         self.state: FSMState = FSMState.OBSERVE
 
     def transition(self, nxt: str) -> None:
-        logger.debug("FSM received transition request: %s", nxt)
+        logger.info("FSM received transition request: %s", nxt)
         bb = self.ctx.blackboard
-        if nxt.lower() == "RUN":
+        if nxt.lower() == "run":
             bb.step_index += 1
             if bb.step_index >= len(bb.plan):
-                nxt_state = FSMState.DONE.value
+                nxt_state = FSMState.DONE
             else:
-                nxt_state = FSMState.ACTION_GEN.value
+                nxt_state = FSMState.ACTION_GEN
                 logger.info("FSM plan next step: %s", bb.plan[bb.step_index])
         else:
-            nxt_state = FSMState(nxt.lower())
-        logger.info("FSM transition: %s -> %s", self.state, nxt_state)
+            try:
+                nxt_state = FSMState(nxt.lower())
+            except ValueError:
+                logger.warning("Unknown next_state '%s', fallback to %s", nxt, FSMState.PLAN)
+                nxt_state = FSMState.PLAN
+        logger.info("FSM transition: %s -> %s", self.state, nxt_state.value if isinstance(nxt_state, FSMState) else nxt_state)
         self.state = nxt_state
         if bb.plan:
             idx = min(bb.step_index, len(bb.plan) - 1)
@@ -64,6 +69,6 @@ class FSM:
             bb.current_step = {}
 
     def write_db(self, record: Dict[str, Any]) -> None:
-        logger.debug("FSM write_db buffered: %s", record.get("type", "unknown"))
+        logger.info("FSM write_db buffered: %s", record.get("type", "unknown"))
         self.ctx.blackboard.db_buffer.append(record)
         # [Todo] flush to persistent store
