@@ -43,7 +43,6 @@ class PythonActionExecutor:
         globals_dict: Dict[str, Any] = {
             "__builtins__": __builtins__,
             "logger": logger,
-            # "gameapi": bb.gameapi,
         }
         globals_dict.update(self.runtime_globals)
 

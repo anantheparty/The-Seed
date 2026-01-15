@@ -133,27 +133,34 @@ You are the ACTION_PROGRAM node.
 
 {_python_only_rule()}
 
-This is a example of the output for Step: "建造一个电厂，再造一个兵营, 造5个步兵":
+This is a example of the output for Step: "展开基地车，建造一个电厂，再造一个兵营, 造5个步兵":
+
+Notes:
+- In this runtime, `api` refers to the **OpenRA midlayer API (MacroActions)**, not the raw GameAPI.
+- Use MacroActions methods like: deploy_mcv_and_wait / ensure_can_produce_unit / produce_wait / query_actor / dispatch_explore / dispatch_attack
+- Do NOT use old methods like: able_to_produce / produce_units / wait (they do not exist on MacroActions).
 
 try:
-    if api.able_to_produce("电厂"):
-        p1 = api.produce_units("电厂", 1)
-        api.wait(p1)
-        logger.info("建造了电厂")
-    else:
-        raise RuntimeError("不能建造电厂")
-    if api.able_to_produce("兵营"):
-        p2 = api.produce_units("兵营", 1)
-        api.wait(p2)
-        logger.info("建造了兵营")
-    else:
-        raise RuntimeError("不能建造兵营")
-    if api.able_to_produce("步兵"):
-        p3 = api.produce_units("步兵", 5)
-        api.wait(p3)
-        logger.info("建造了步兵")
-    else:
-        raise RuntimeError("不能建造步兵")
+    # 展开基地车（会阻塞等待一小会）
+    api.deploy_mcv_and_wait(wait_time=1.0)
+    logger.info("展开了基地车")
+
+    # 生产前置：确保能生产对应单位/建筑（必要时会自动建造前置并等待）
+    if not api.ensure_can_produce_unit("电厂"):
+        raise RuntimeError("不能生产电厂：前置不足或失败")
+    api.produce_wait("电厂", 1, auto_place_building=True)
+    logger.info("建造了电厂")
+
+    if not api.ensure_can_produce_unit("兵营"):
+        raise RuntimeError("不能生产兵营：前置不足或失败")
+    api.produce_wait("兵营", 1, auto_place_building=True)
+    logger.info("建造了兵营")
+
+    if not api.ensure_can_produce_unit("步兵"):
+        raise RuntimeError("不能生产步兵：前置不足或失败")
+    api.produce_wait("步兵", 5, auto_place_building=True)
+    logger.info("建造了步兵")
+
     infantry = api.query_actor(TargetsQueryParam(type=["步兵"], faction="自己"))
     logger.info(f"now infantry count: {{len(infantry)}}")
     
