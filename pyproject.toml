@@ -5,6 +5,7 @@ description = "LLM Agent framework"
 requires-python = ">=3.10"
 dependencies = [
     "openai>=1.49.0",
+    "websockets>=12.0",
 ]
 
 [tool.setuptools.packages.find]
