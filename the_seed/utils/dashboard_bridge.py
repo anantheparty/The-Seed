@@ -122,6 +122,8 @@ class DashboardBridge:
         # Metrics tracking
         self.llm_calls: Deque[float] = deque(maxlen=100)
         self.tokens_used: Deque[tuple[float, int]] = deque(maxlen=100)
+        self.total_tokens = 0
+        self.total_llm_calls = 0
         self.action_count = 0
         self.action_failures = 0
         self.action_recoveries = 0
@@ -279,8 +281,10 @@ class DashboardBridge:
         """Track LLM call for metrics."""
         current_time = time.time()
         self.llm_calls.append(current_time)
+        self.total_llm_calls += 1
         if tokens > 0:
             self.tokens_used.append((current_time, tokens))
+            self.total_tokens += tokens
 
         # Calculate and broadcast metrics
         self._broadcast_agent_metrics()
@@ -361,17 +365,6 @@ class DashboardBridge:
         """Calculate and broadcast agent metrics."""
         current_time = time.time()
 
-        # Calculate tokens per minute
-        recent_tokens = [
-            tokens for ts, tokens in self.tokens_used
-            if current_time - ts < 60
-        ]
-        tokens_per_min = sum(recent_tokens) if recent_tokens else 0.0
-
-        # Calculate LLM calls per minute
-        recent_calls = [ts for ts in self.llm_calls if current_time - ts < 60]
-        llm_calls_per_min = len(recent_calls)
-
         # Calculate failure rate
         failure_rate = (
             self.action_failures / self.action_count
@@ -385,8 +378,8 @@ class DashboardBridge:
         )
 
         payload = AgentMetricsPayload(
-            tokens_per_min=tokens_per_min,
-            llm_calls_per_min=llm_calls_per_min,
+            tokens_per_min=float(self.total_tokens),  # Using per_min field for total
+            llm_calls_per_min=float(self.total_llm_calls),  # Using per_min field for total
             active_tasks=0,  # TODO: Track active tasks
             total_actions=self.action_count,
             execution_volume=self.action_count,
