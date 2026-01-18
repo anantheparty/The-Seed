@@ -117,6 +117,7 @@ class DashboardBridge:
         self.server_thread: Optional[threading.Thread] = None
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self.running = False
+        self.command_handler: Optional[callable] = None
 
         # Metrics tracking
         self.llm_calls: Deque[float] = deque(maxlen=100)
@@ -130,12 +131,19 @@ class DashboardBridge:
         self.recent_queries: Deque[MemoryQuery] = deque(maxlen=50)
         self.recent_additions: Deque[MemoryEntry] = deque(maxlen=50)
 
-    def start(self, host: str = "127.0.0.1", port: int = 8080) -> None:
-        """Start WebSocket server in background thread."""
+    def start(self, host: str = "127.0.0.1", port: int = 8080, command_handler: callable = None) -> None:
+        """Start WebSocket server in background thread.
+
+        Args:
+            host: Server host address
+            port: Server port
+            command_handler: Optional callback function(command: str) to handle dashboard commands
+        """
         if self.running:
             logger.warning("Dashboard bridge already running")
             return
 
+        self.command_handler = command_handler
         self.running = True
         self.server_thread = threading.Thread(
             target=self._run_server, args=(host, port), daemon=True
@@ -206,9 +214,20 @@ class DashboardBridge:
 
             if msg_type == "command":
                 # Handle dashboard commands
-                command = data.get("command", "")
-                logger.info(f"Dashboard command: {command}")
-                # TODO: Forward command to FSM or game
+                payload = data.get("payload", {})
+                command = payload.get("command", "")
+                logger.info(f"Dashboard command received: {command}")
+
+                # Call registered command handler if available
+                if self.command_handler:
+                    # Run handler in separate thread to avoid blocking WebSocket
+                    threading.Thread(
+                        target=self.command_handler,
+                        args=(command,),
+                        daemon=True
+                    ).start()
+                else:
+                    logger.warning("No command handler registered")
 
         except Exception as e:
             logger.error(f"Error handling client message: {e}")
