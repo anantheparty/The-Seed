@@ -95,32 +95,47 @@ def build_observe_user(p: Dict[str, Any]) -> str:
 # Plan Node Prompts
 # -----------------------------
 PLAN_SYSTEM = (
-    "You are the PLAN node in an agent workflow.\n"
-    "You must choose the next macro step(s) based on the current situation and goal.\n"
-    "Your plan must be short and testable (2~4 steps max).\n"
+    "You are the PLAN node in an agent workflow.\n\n"
+    "CRITICAL RULES:\n"
+    "1. Your ONLY job is to plan how to achieve the [Goal] given by the user.\n"
+    "2. DO NOT expand or interpret the goal - follow it EXACTLY as stated.\n"
+    "3. DO NOT assume the goal is already completed.\n"
+    "4. If the goal is simple and direct (e.g., '展开基地车'), your plan should directly address that specific task.\n"
+    "5. DO NOT add extra steps beyond what the user asked for.\n\n"
+    "Planning guidelines:\n"
+    "- Keep plan short and testable (1~4 steps max).\n"
+    "- For simple goals like '展开基地车', the plan should be just that one step.\n"
+    "- Only break into multiple steps if the goal explicitly requires multiple actions.\n"
+    "- Your assumptions should reflect what needs to be true for YOUR PLAN to work, not assumptions about the goal being done.\n\n"
     + _json_only_rule() +
     "Output schema:\n"
     "{\n"
     '  "plan": [\n'
     "    {\n"
-    '      "step": string,\n'
+    '      "step": string,  // The actual action to take, matching the user goal\n'
     "    }\n"
     "  ],\n"
-    '  "assumptions": [string]\n'
+    '  "assumptions": [string]  // What must be true for this plan to execute, NOT assumptions about goal completion\n'
     "}\n"
 )
 
 
 def build_plan_user(p: Dict[str, Any]) -> str:
+    goal = p.get('goal', '')
     return (
-        "[Goal]\n"
-        f"{p.get('goal', '')}\n\n"
+        f"[User Goal]\n"
+        f"{goal}\n\n"
+        f"IMPORTANT: Your plan must achieve exactly this goal: \"{goal}\"\n"
+        f"Do NOT assume this goal is already completed.\n"
+        f"Do NOT add steps beyond what the user asked for.\n\n"
         "[Game Basic State]\n"
         f"{p.get('game_basic_state', '')}\n\n"
         "[GameDetailState(optional)] (Observed by earlier nodes)\n"
         f"{p.get('game_detail_state', '')}\n\n"
-        "Constraints:\n"
-        "- Keep plan short (2~4 steps).\n"
+        "Task:\n"
+        f"Generate a plan to achieve the user goal: \"{goal}\"\n"
+        "- If the goal is simple (1 action), make a 1-step plan.\n"
+        "- Keep plan focused and direct (1~4 steps max).\n"
     )
 
 
