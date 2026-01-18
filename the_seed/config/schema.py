@@ -23,7 +23,7 @@ class ModelConfig:
     # 默认值: "sk-xxx"
     api_key: str = "sk-xxx"
     # 默认值: "https://openai.com/api/v1"
-    base_url: Optional[str] = "hhttps://openai.com/api/v1"
+    base_url: Optional[str] = "https://openai.com/api/v1"
     # 默认值: "gpt-4o-mini"
     model: str = "gpt-4o-mini"
     # 默认值: 1024
