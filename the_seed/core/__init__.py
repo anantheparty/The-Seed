@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+# New simplified architecture
+from .codegen import CodeGenNode, CodeGenResult
+from .executor import SimpleExecutor, ExecutorContext, ExecutionResult
+
+# Legacy (kept for backward compatibility, will be removed later)
 from .blackboard import Blackboard
 from .factory import (
     NodeFactory,
@@ -17,6 +22,13 @@ from .node import (
 )
 
 __all__ = [
+    # New
+    "CodeGenNode",
+    "CodeGenResult",
+    "SimpleExecutor",
+    "ExecutorContext",
+    "ExecutionResult",
+    # Legacy
     "Blackboard",
     "FSM",
     "FSMContext",
