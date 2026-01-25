@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict
 
-from ..utils import LogManager
+from ...utils import LogManager
 # from inner_loop import InnerLoopRuntime
 from .blackboard import Blackboard
 
