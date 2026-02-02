@@ -118,6 +118,8 @@ class DashboardBridge:
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self.running = False
         self.command_handler: Optional[callable] = None
+        self.enemy_chat_handler: Optional[callable] = None
+        self.enemy_control_handler: Optional[callable] = None
 
         # Metrics tracking
         self.llm_calls: Deque[float] = deque(maxlen=100)
@@ -133,19 +135,23 @@ class DashboardBridge:
         self.recent_queries: Deque[MemoryQuery] = deque(maxlen=50)
         self.recent_additions: Deque[MemoryEntry] = deque(maxlen=50)
 
-    def start(self, host: str = "127.0.0.1", port: int = 8080, command_handler: callable = None) -> None:
+    def start(self, host: str = "127.0.0.1", port: int = 8080, command_handler: callable = None, enemy_chat_handler: callable = None, enemy_control_handler: callable = None) -> None:
         """Start WebSocket server in background thread.
 
         Args:
             host: Server host address
             port: Server port
             command_handler: Optional callback function(command: str) to handle dashboard commands
+            enemy_chat_handler: Optional callback function(message: str) to handle enemy chat messages
+            enemy_control_handler: Optional callback function(action: str, params: dict) to handle enemy control
         """
         if self.running:
             logger.warning("Dashboard bridge already running")
             return
 
         self.command_handler = command_handler
+        self.enemy_chat_handler = enemy_chat_handler
+        self.enemy_control_handler = enemy_control_handler
         self.running = True
         self.server_thread = threading.Thread(
             target=self._run_server, args=(host, port), daemon=True
@@ -230,6 +236,36 @@ class DashboardBridge:
                     ).start()
                 else:
                     logger.warning("No command handler registered")
+
+            elif msg_type == "enemy_chat":
+                # Handle player-to-enemy chat messages
+                payload = data.get("payload", {})
+                text = payload.get("message", "")
+                logger.info(f"Enemy chat message from player: {text}")
+
+                if self.enemy_chat_handler:
+                    threading.Thread(
+                        target=self.enemy_chat_handler,
+                        args=(text,),
+                        daemon=True
+                    ).start()
+                else:
+                    logger.warning("No enemy chat handler registered")
+
+            elif msg_type == "enemy_control":
+                # Handle enemy agent control commands (start/stop/config)
+                payload = data.get("payload", {})
+                action = payload.get("action", "")
+                logger.info(f"Enemy control: {action}")
+
+                if self.enemy_control_handler:
+                    threading.Thread(
+                        target=self.enemy_control_handler,
+                        args=(action, payload),
+                        daemon=True
+                    ).start()
+                else:
+                    logger.warning("No enemy control handler registered")
 
         except Exception as e:
             logger.error(f"Error handling client message: {e}")

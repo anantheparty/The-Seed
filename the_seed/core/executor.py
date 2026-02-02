@@ -35,6 +35,10 @@ class ExecutionResult:
         }
 
 
+# 状态回调类型
+StatusCallback = Callable[[str, str], None]
+
+
 @dataclass
 class ExecutorContext:
     """执行器上下文"""
@@ -50,6 +54,9 @@ class ExecutorContext:
     
     # 观测函数
     observe_fn: Optional[Callable[[], str]] = None
+    
+    # 状态回调函数 (stage, detail) -> None
+    status_callback: Optional[StatusCallback] = None
     
     # 执行历史
     history: List[Dict[str, Any]] = field(default_factory=list)
@@ -71,6 +78,14 @@ class SimpleExecutor:
         self.codegen = codegen
         self.ctx = ctx
     
+    def _send_status(self, stage: str, detail: str = "") -> None:
+        """发送状态更新"""
+        if self.ctx.status_callback:
+            try:
+                self.ctx.status_callback(stage, detail)
+            except Exception as e:
+                logger.warning("Status callback failed: %s", e)
+    
     def run(self, command: str) -> ExecutionResult:
         """
         执行玩家指令
@@ -84,6 +99,7 @@ class SimpleExecutor:
         logger.info("SimpleExecutor: processing command: %s", command)
         
         # 1. 观测游戏状态
+        self._send_status("observing", "正在观测游戏状态...")
         game_state = self._observe()
         logger.info("SimpleExecutor: game state observed")
         
@@ -91,6 +107,7 @@ class SimpleExecutor:
         history_text = self._build_history_text()
         
         # 3. 生成代码
+        self._send_status("thinking", "AI 正在分析并生成代码...")
         try:
             gen_result = self.codegen.generate(
                 command=command,
@@ -100,6 +117,7 @@ class SimpleExecutor:
             )
         except Exception as e:
             logger.error("SimpleExecutor: code generation failed: %s", e)
+            self._send_status("error", f"代码生成失败: {e}")
             return ExecutionResult(
                 success=False,
                 message=f"代码生成失败: {e}",
@@ -108,6 +126,7 @@ class SimpleExecutor:
         
         if not gen_result.code.strip():
             logger.warning("SimpleExecutor: empty code generated")
+            self._send_status("error", "LLM 返回了空代码")
             return ExecutionResult(
                 success=False,
                 message="LLM 返回了空代码",
@@ -115,6 +134,7 @@ class SimpleExecutor:
             )
         
         # 4. 执行代码
+        self._send_status("executing", "正在执行生成的代码...")
         exec_result = self._execute_code(gen_result.code)
         
         # 5. 记录历史
