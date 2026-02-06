@@ -3,6 +3,8 @@ from __future__ import annotations
 # Default command dictionary for OpenRA agent demo.
 # Keep this small and extensible; add more intents as needed.
 
+DEFAULT_COMMAND_TEMPLATE_DIR = "templates/commands"
+
 COMMAND_DICT = {
     "deploy_mcv": {
         "synonyms": [
@@ -18,22 +20,6 @@ COMMAND_DICT = {
             "建造厂展开",
             "mcv部署",
         ],
-        "template": """
-try:
-    api.deploy_mcv_and_wait(wait_time=1.0)
-    logger.info(\"基地车已展开\")
-    __result__ = {
-        \"success\": True,
-        \"message\": \"已展开基地车\",
-        \"observations\": \"\"
-    }
-except Exception as e:
-    __result__ = {
-        \"success\": False,
-        \"message\": f\"执行失败: {e}\",
-        \"observations\": \"\"
-    }
-""",
     },
     "produce": {
         "synonyms": [
@@ -55,24 +41,6 @@ except Exception as e:
             "做一个",
             "做一辆",
         ],
-        "template": """
-try:
-    if not api.ensure_can_produce_unit(\"$unit\"):
-        raise RuntimeError(\"不能生产$unit：前置不足或失败\")
-    api.produce_wait(\"$unit\", $count, auto_place_building=True)
-    logger.info(\"生产了$count个$unit\")
-    __result__ = {
-        \"success\": True,
-        \"message\": \"已生产$count个$unit\",
-        \"observations\": \"\"
-    }
-except Exception as e:
-    __result__ = {
-        \"success\": False,
-        \"message\": f\"执行失败: {e}\",
-        \"observations\": \"\"
-    }
-""",
     },
     "attack": {
         "synonyms": [
@@ -86,26 +54,6 @@ except Exception as e:
             "干掉",
             "消灭",
         ],
-        "template": """
-try:
-    attackers = api.query_actor($attackers)
-    targets = api.query_actor($targets)
-    if not attackers or not targets:
-        raise RuntimeError("未找到攻击者或目标")
-    api.dispatch_attack(attackers, targets[0])
-    logger.info("已下达攻击指令")
-    __result__ = {
-        "success": True,
-        "message": "已下达攻击指令",
-        "observations": ""
-    }
-except Exception as e:
-    __result__ = {
-        "success": False,
-        "message": f"执行失败: {e}",
-        "observations": ""
-    }
-""",
     },
     "explore": {
         "synonyms": [
@@ -117,25 +65,6 @@ except Exception as e:
             "去看看",
             "搜索",
         ],
-        "template": """
-try:
-    units = api.query_actor($units)
-    if not units:
-        raise RuntimeError("未找到可侦察单位")
-    api.dispatch_explore(units)
-    logger.info("已派出侦察单位")
-    __result__ = {
-        "success": True,
-        "message": "已派出侦察单位",
-        "observations": ""
-    }
-except Exception as e:
-    __result__ = {
-        "success": False,
-        "message": f"执行失败: {e}",
-        "observations": ""
-    }
-""",
     },
     "mine": {
         "synonyms": [
@@ -146,25 +75,6 @@ except Exception as e:
             "去矿区",
             "去采矿",
         ],
-        "template": """
-try:
-    harvesters = api.query_actor($harvesters)
-    if not harvesters:
-        raise RuntimeError("未找到矿车")
-    api.harvester_mine(harvesters[0])
-    logger.info("已下达采矿指令")
-    __result__ = {
-        "success": True,
-        "message": "已下达采矿指令",
-        "observations": ""
-    }
-except Exception as e:
-    __result__ = {
-        "success": False,
-        "message": f"执行失败: {e}",
-        "observations": ""
-    }
-""",
     },
     "query_actor": {
         "synonyms": [
@@ -177,21 +87,6 @@ except Exception as e:
             "查兵",
             "查单位",
         ],
-        "template": """
-try:
-    actors = api.query_actor($targets)
-    __result__ = {
-        "success": True,
-        "message": "查询完成",
-        "observations": f"actor_count={len(actors)}"
-    }
-except Exception as e:
-    __result__ = {
-        "success": False,
-        "message": f"执行失败: {e}",
-        "observations": ""
-    }
-""",
     },
 }
 

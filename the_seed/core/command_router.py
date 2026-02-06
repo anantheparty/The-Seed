@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional
 
 from ..config.command_dict import (
     COMMAND_DICT,
+    DEFAULT_COMMAND_TEMPLATE_DIR,
     DIRECTION_ALIASES,
     ENTITY_ALIASES,
     FACTION_ALIASES,
@@ -50,6 +51,7 @@ class CommandRouter:
         similarity_threshold: float = 0.72,
         command_dict: Optional[Dict[str, Dict[str, Any]]] = None,
         dict_path: Optional[str] = None,
+        template_dir: Optional[str] = None,
         entity_aliases: Optional[Dict[str, list[str]]] = None,
         direction_aliases: Optional[Dict[str, list[str]]] = None,
         faction_aliases: Optional[Dict[str, list[str]]] = None,
@@ -62,6 +64,8 @@ class CommandRouter:
         self.direction_aliases = direction_aliases or DIRECTION_ALIASES
         self.faction_aliases = faction_aliases or FACTION_ALIASES
         self.range_aliases = range_aliases or RANGE_ALIASES
+        self.template_dir = self._resolve_template_dir(template_dir, dict_path)
+        self._template_map = self._load_templates()
 
         self._entity_alias_map = self._build_alias_map(self.entity_aliases)
         self._direction_alias_map = self._build_alias_map(self.direction_aliases)
@@ -98,7 +102,25 @@ class CommandRouter:
             )
 
         entities = self._extract_entities(normalized, intent)
-        template = self.command_dict[intent].get("template", "")
+        template = self._template_map.get(intent)
+        if template is None:
+            return RouteResult(
+                matched=False,
+                intent=intent,
+                score=score,
+                reason="template_missing",
+                entities=entities,
+            )
+
+        if not template.strip():
+            return RouteResult(
+                matched=False,
+                intent=intent,
+                score=score,
+                reason="empty_template",
+                entities=entities,
+            )
+
         code = self._render_template(intent, template, entities)
         if not code:
             return RouteResult(
@@ -106,15 +128,6 @@ class CommandRouter:
                 intent=intent,
                 score=score,
                 reason="render_failed",
-                entities=entities,
-            )
-
-        if not code.strip():
-            return RouteResult(
-                matched=False,
-                intent=intent,
-                score=score,
-                reason="empty_template",
                 entities=entities,
             )
 
@@ -142,6 +155,45 @@ class CommandRouter:
         except Exception as e:
             logger.warning("CommandRouter: failed to load dict: %s", e)
         return None
+
+    def _resolve_template_dir(self, template_dir: Optional[str], dict_path: Optional[str]) -> Path:
+        if template_dir:
+            return Path(template_dir)
+        if dict_path:
+            return Path(dict_path).parent / DEFAULT_COMMAND_TEMPLATE_DIR
+        return Path(__file__).resolve().parents[1] / DEFAULT_COMMAND_TEMPLATE_DIR
+
+    def _load_templates(self) -> Dict[str, Optional[str]]:
+        template_map: Dict[str, Optional[str]] = {}
+        for intent, rule in self.command_dict.items():
+            template_path = self._resolve_template_path(intent, rule)
+            try:
+                template_map[intent] = template_path.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                logger.warning(
+                    "CommandRouter: template not found for intent=%s path=%s",
+                    intent,
+                    template_path,
+                )
+                template_map[intent] = None
+            except Exception as e:
+                logger.warning(
+                    "CommandRouter: failed to load template intent=%s path=%s err=%s",
+                    intent,
+                    template_path,
+                    e,
+                )
+                template_map[intent] = None
+        return template_map
+
+    def _resolve_template_path(self, intent: str, rule: Dict[str, Any]) -> Path:
+        template_file = rule.get("template_file")
+        if template_file:
+            candidate = Path(str(template_file))
+            if candidate.is_absolute():
+                return candidate
+            return self.template_dir / candidate
+        return self.template_dir / f"{intent}.py.tmpl"
 
     def _normalize(self, text: str) -> str:
         text = (text or "").strip().lower()
