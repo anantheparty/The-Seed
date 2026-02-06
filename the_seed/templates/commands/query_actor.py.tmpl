@@ -1,0 +1,13 @@
+try:
+    actors = api.query_actor($targets)
+    __result__ = {
+        "success": True,
+        "message": "查询完成",
+        "observations": f"actor_count={len(actors)}"
+    }
+except Exception as e:
+    __result__ = {
+        "success": False,
+        "message": f"执行失败: {e}",
+        "observations": ""
+    }

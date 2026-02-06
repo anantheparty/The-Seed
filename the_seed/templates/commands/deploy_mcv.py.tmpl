@@ -1,0 +1,14 @@
+try:
+    api.deploy_mcv_and_wait(wait_time=1.0)
+    logger.info("基地车已展开")
+    __result__ = {
+        "success": True,
+        "message": "已展开基地车",
+        "observations": ""
+    }
+except Exception as e:
+    __result__ = {
+        "success": False,
+        "message": f"执行失败: {e}",
+        "observations": ""
+    }
