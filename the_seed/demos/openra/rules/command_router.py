@@ -458,10 +458,18 @@ class CommandRouter:
         count = entities.get("count")
         looks_query = self._looks_like_query(command)
         looks_produce = self._looks_like_produce(command)
+        looks_expand_mine = self._looks_like_expand_mine(command)
+        looks_implicit_produce = self._looks_like_implicit_produce(command, unit)
         looks_stop_attack = self._looks_like_stop_attack(command)
 
         if looks_stop_attack:
             return "stop_attack", max(score, 0.90)
+
+        if looks_expand_mine:
+            return "produce", max(score, 0.92)
+
+        if looks_implicit_produce and unit and not looks_query:
+            return "produce", max(score, 0.88)
 
         if looks_query and unit:
             if intent in (None, "produce"):
@@ -499,10 +507,37 @@ class CommandRouter:
     def _looks_like_produce(command: str) -> bool:
         return bool(
             re.search(
-                r"(建造|生产|训练|制造|造|补(?!给)|爆兵|出兵|起兵|来一个|来一辆|搞一个|整一个)",
+                r"(建造|生产|训练|制造|造|补(?!给)|爆兵|出兵|起兵|来一个|来一辆|搞一个|整一个|下电|补电|下兵营|下车间|开车间|拍兵)",
                 command,
             )
         )
+
+    @staticmethod
+    def _looks_like_expand_mine(command: str) -> bool:
+        return bool(
+            re.search(
+                r"(开(?:[一二三四五六七八九十两\d]+)?矿|开分矿|双矿|三矿|起矿|拉矿场|补矿)",
+                command,
+            )
+        )
+
+    @staticmethod
+    def _looks_like_implicit_produce(command: str, unit: Optional[str]) -> bool:
+        if not unit:
+            return False
+        if re.search(r"(展开|部署|下基地|开基地|基地车|建造车|mcv)", command):
+            return False
+        if re.search(r"(采矿|挖矿|采集|矿车干活|矿车采矿|去矿区|拉钱|采钱)", command):
+            return False
+        if re.search(r"(侦察|侦查|探索|探路|探图|开图)", command):
+            return False
+        if re.search(r"(查询|查看|列出|查下|看下|看看|有多少|多少|几辆|几只|几架|兵力)", command):
+            return False
+        if re.search(r"(攻击|进攻|突袭|集火|停火|停止攻击|停止进攻|取消攻击)", command):
+            return False
+        if re.search(r"^([0-9一二三四五六七八九十两]+)(个|辆|座|架|名|只|台)?", command):
+            return True
+        return bool(re.fullmatch(r"[\u4e00-\u9fffA-Za-z0-9]{1,8}", command))
 
     @staticmethod
     def _looks_like_stop_attack(command: str) -> bool:
@@ -581,6 +616,10 @@ class CommandRouter:
         entities = self._extract_common_entities(command)
         items = self._extract_production_items(command)
 
+        if not items and self._looks_like_expand_mine(command):
+            mine_count = self._extract_expand_mine_count(command)
+            items = [{"unit": "矿场", "count": mine_count}]
+
         if items:
             entities["production_items"] = items
             entities["unit"] = items[0]["unit"]
@@ -594,6 +633,34 @@ class CommandRouter:
             ]
 
         return entities
+
+    @staticmethod
+    def _extract_expand_mine_count(command: str) -> int:
+        m = re.search(r"开([一二三四五六七八九十两\d]+)矿", command)
+        if m:
+            raw = m.group(1)
+            if raw.isdigit():
+                return max(1, int(raw))
+            simple = {
+                "一": 1,
+                "二": 2,
+                "两": 2,
+                "三": 3,
+                "四": 4,
+                "五": 5,
+                "六": 6,
+                "七": 7,
+                "八": 8,
+                "九": 9,
+                "十": 10,
+            }
+            if raw in simple:
+                return simple[raw]
+        if "双矿" in command:
+            return 2
+        if "三矿" in command:
+            return 3
+        return 1
 
     def _extract_production_items(self, command: str) -> list[Dict[str, Any]]:
         segments = self._split_by_keywords(command, PRODUCE_SEPARATORS)
