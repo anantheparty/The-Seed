@@ -1,11 +1,13 @@
 try:
     _step_messages = []
-    actors = api.query_actor($targets)
-    _step_messages.append(f"查询完成，匹配到{len(actors)}个单位")
+    _current_step = 1
+    _current_intent = "$intent"
+$step_code
+    _message = _step_messages[-1] if _step_messages else "执行完成"
     __result__ = {
         "success": True,
-        "message": _step_messages[-1],
-        "observations": f"actor_count={len(actors)}"
+        "message": _message,
+        "observations": ""
     }
 except Exception as e:
     __result__ = {

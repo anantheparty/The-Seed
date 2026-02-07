@@ -1,0 +1,6 @@
+units = api.query_actor($units)
+if not units:
+    raise RuntimeError("未找到可侦察单位")
+api.dispatch_explore(units)
+logger.info("已派出侦察单位")
+_step_messages.append("已派出侦察单位")

@@ -1,0 +1,3 @@
+actors = api.query_actor($targets)
+logger.info("查询完成，actor_count=%s", len(actors))
+_step_messages.append(f"查询完成，匹配到{len(actors)}个单位")

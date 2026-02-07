@@ -1,0 +1,6 @@
+harvesters = api.query_actor($harvesters)
+if not harvesters:
+    raise RuntimeError("未找到矿车")
+api.harvester_mine(harvesters[0])
+logger.info("已下达采矿指令")
+_step_messages.append("已下达采矿指令")
