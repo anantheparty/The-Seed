@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import threading
 import time
 from collections import deque
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Deque, Optional, Set
 
 import websockets
@@ -135,6 +137,14 @@ class DashboardBridge:
         self.recent_queries: Deque[MemoryQuery] = deque(maxlen=50)
         self.recent_additions: Deque[MemoryEntry] = deque(maxlen=50)
 
+        # Event log persistence
+        default_path = Path("Logs") / "dashboard_events.jsonl"
+        raw_path = os.getenv("DASHBOARD_EVENT_LOG_PATH", str(default_path)).strip()
+        self.event_log_path = Path(raw_path) if raw_path else default_path
+        self.event_log_enabled = os.getenv("DASHBOARD_EVENT_LOG_ENABLED", "1").strip() not in {"0", "false", "False"}
+        self._event_log_lock = threading.Lock()
+        self._event_seq = 0
+
     def start(self, host: str = "127.0.0.1", port: int = 8080, command_handler: callable = None, enemy_chat_handler: callable = None, enemy_control_handler: callable = None) -> None:
         """Start WebSocket server in background thread.
 
@@ -158,6 +168,11 @@ class DashboardBridge:
         )
         self.server_thread.start()
         logger.info(f"Dashboard bridge started on ws://{host}:{port}")
+        self._append_event_log(
+            "bridge_start",
+            {"host": host, "port": port},
+            {"running": self.running},
+        )
 
     def _run_server(self, host: str, port: int) -> None:
         """Run WebSocket server event loop."""
@@ -167,6 +182,11 @@ class DashboardBridge:
         async def handler(websocket: WebSocketServerProtocol) -> None:
             self.clients.add(websocket)
             logger.info(f"Dashboard client connected: {websocket.remote_address}")
+            self._append_event_log(
+                "client_connected",
+                {"remote": str(websocket.remote_address)},
+                {"clients": len(self.clients)},
+            )
 
             try:
                 # Send initial state
@@ -181,6 +201,11 @@ class DashboardBridge:
             finally:
                 self.clients.discard(websocket)
                 logger.info(f"Dashboard client disconnected: {websocket.remote_address}")
+                self._append_event_log(
+                    "client_disconnected",
+                    {"remote": str(websocket.remote_address)},
+                    {"clients": len(self.clients)},
+                )
 
         async def serve() -> None:
             async with websockets.serve(handler, host, port):
@@ -190,6 +215,7 @@ class DashboardBridge:
             self.loop.run_until_complete(serve())
         except Exception as e:
             logger.error(f"Dashboard server error: {e}")
+            self._append_event_log("server_error", {"error": str(e)}, None)
 
     async def _send_init_message(self, websocket: WebSocketServerProtocol) -> None:
         """Send initial state to newly connected client."""
@@ -217,8 +243,14 @@ class DashboardBridge:
     async def _handle_client_message(self, websocket: WebSocketServerProtocol, message: str) -> None:
         """Handle messages from dashboard clients."""
         try:
+            self._append_event_log(
+                "client_message_raw",
+                {"remote": str(websocket.remote_address), "message": message},
+                None,
+            )
             data = json.loads(message)
             msg_type = data.get("type")
+            self._append_event_log("client_message", {"remote": str(websocket.remote_address), "type": msg_type, "payload": data.get("payload", {})}, None)
 
             if msg_type == "command":
                 # Handle dashboard commands
@@ -269,15 +301,25 @@ class DashboardBridge:
 
         except Exception as e:
             logger.error(f"Error handling client message: {e}")
+            self._append_event_log("client_message_error", {"error": str(e)}, None)
 
     def broadcast(self, message_type: str, payload: Any) -> None:
         """Broadcast message to all connected clients."""
+        payload_dict = asdict(payload) if hasattr(payload, '__dict__') else payload
+        self._append_event_log(
+            "server_broadcast",
+            {
+                "type": message_type,
+                "payload": payload_dict,
+            },
+            {"clients": len(self.clients), "loop_ready": self.loop is not None},
+        )
         if not self.clients or not self.loop:
             return
 
         message = {
             "type": message_type,
-            "payload": asdict(payload) if hasattr(payload, '__dict__') else payload
+            "payload": payload_dict
         }
 
         async def send_to_all() -> None:
@@ -288,6 +330,27 @@ class DashboardBridge:
                 )
 
         asyncio.run_coroutine_threadsafe(send_to_all(), self.loop)
+
+    def _append_event_log(self, event: str, payload: Any, meta: Optional[dict[str, Any]]) -> None:
+        if not self.event_log_enabled:
+            return
+
+        now_ms = int(time.time() * 1000)
+        with self._event_log_lock:
+            self._event_seq += 1
+            record = {
+                "ts_ms": now_ms,
+                "seq": self._event_seq,
+                "event": event,
+                "payload": payload,
+                "meta": meta or {},
+            }
+            try:
+                self.event_log_path.parent.mkdir(parents=True, exist_ok=True)
+                with self.event_log_path.open("a", encoding="utf-8") as f:
+                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            except Exception as e:
+                logger.error("DashboardBridge event log write failed: %s", e)
 
     def update_fsm_state(self, fsm: 'FSM') -> None:
         """Update FSM state and broadcast to clients."""
