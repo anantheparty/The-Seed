@@ -1,11 +1,13 @@
 try:
+    _step_messages = []
     if not api.ensure_can_produce_unit("$unit"):
         raise RuntimeError("不能生产$unit：前置不足或失败")
     api.produce_wait("$unit", $count, auto_place_building=True)
     logger.info("生产了$count个$unit")
+    _step_messages.append("已生产$count个$unit")
     __result__ = {
         "success": True,
-        "message": "已生产$count个$unit",
+        "message": _step_messages[-1],
         "observations": ""
     }
 except Exception as e:

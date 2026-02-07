@@ -1,0 +1,23 @@
+try:
+    _step_messages = []
+    _current_step = 0
+    _current_intent = ""
+    _current_clause = ""
+$step_blocks
+    _combined_message = "；".join(_step_messages) if _step_messages else "复合指令执行完成"
+    __result__ = {
+        "success": True,
+        "message": _combined_message,
+        "observations": ""
+    }
+except Exception as e:
+    _failed_step = int(locals().get("_current_step", 0))
+    if _failed_step > 0:
+        _prefix = f"复合指令执行失败（步骤{_failed_step}）"
+    else:
+        _prefix = "复合指令执行失败"
+    __result__ = {
+        "success": False,
+        "message": f"{_prefix}: {e}",
+        "observations": ""
+    }

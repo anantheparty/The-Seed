@@ -1,13 +1,17 @@
 try:
+    _step_messages = []
     attackers = api.query_actor($attackers)
     targets = api.query_actor($targets)
-    if not attackers or not targets:
-        raise RuntimeError("未找到攻击者或目标")
+    if not attackers:
+        raise RuntimeError("未找到攻击者")
+    if not targets:
+        raise RuntimeError("未找到攻击目标")
     api.dispatch_attack(attackers, targets[0])
     logger.info("已下达攻击指令")
+    _step_messages.append("已下达攻击指令")
     __result__ = {
         "success": True,
-        "message": "已下达攻击指令",
+        "message": _step_messages[-1],
         "observations": ""
     }
 except Exception as e:

@@ -1,12 +1,14 @@
 try:
+    _step_messages = []
     units = api.query_actor($units)
     if not units:
         raise RuntimeError("未找到可侦察单位")
     api.dispatch_explore(units)
     logger.info("已派出侦察单位")
+    _step_messages.append("已派出侦察单位")
     __result__ = {
         "success": True,
-        "message": "已派出侦察单位",
+        "message": _step_messages[-1],
         "observations": ""
     }
 except Exception as e:

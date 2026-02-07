@@ -1,9 +1,11 @@
 try:
+    _step_messages = []
     api.deploy_mcv_and_wait(wait_time=1.0)
     logger.info("基地车已展开")
+    _step_messages.append("已展开基地车")
     __result__ = {
         "success": True,
-        "message": "已展开基地车",
+        "message": _step_messages[-1],
         "observations": ""
     }
 except Exception as e:
