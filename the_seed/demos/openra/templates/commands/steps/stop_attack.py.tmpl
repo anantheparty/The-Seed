@@ -1,0 +1,8 @@
+units = api.query_actor($units)
+if not units:
+    units = api.query_actor($fallback_units)
+if not units:
+    raise RuntimeError("未找到可停止的己方单位")
+api.stop_units(units)
+logger.info("已下达停止攻击指令，units=%s", len(units))
+_step_messages.append(f"已停止{len(units)}个单位的当前行动")

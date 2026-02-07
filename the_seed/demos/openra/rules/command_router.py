@@ -206,7 +206,7 @@ class CommandRouter:
         entities_hint = self._extract_common_entities(clause)
 
         intent, score = self._match_intent(clause)
-        intent, score = self._apply_entity_heuristics(intent, score, entities_hint)
+        intent, score = self._apply_entity_heuristics(intent, score, entities_hint, clause)
         if not intent:
             return ClauseRouteResult(
                 matched=False,
@@ -366,11 +366,18 @@ class CommandRouter:
     def _normalize(self, text: str) -> str:
         text = (text or "").strip().lower()
         text = re.sub(r"\s+", "", text)
-        return self._strip_fillers(text)
+        text = self._strip_fillers(text)
+        text = self._strip_polite_tail(text)
+        return text
 
     @staticmethod
     def _strip_fillers(text: str) -> str:
         fillers = [
+            "请帮我",
+            "麻烦你",
+            "麻烦",
+            "烦请",
+            "劳烦",
             "来个",
             "来一个",
             "来一辆",
@@ -383,6 +390,42 @@ class CommandRouter:
         for filler in fillers:
             text = text.replace(filler, "")
         return text
+
+    @staticmethod
+    def _strip_polite_tail(text: str) -> str:
+        tail_tokens = [
+            "谢谢你",
+            "谢谢",
+            "辛苦了",
+            "辛苦",
+            "快点",
+            "赶紧",
+            "立刻",
+            "马上",
+            "尽快",
+            "好吗",
+            "好么",
+            "好嘛",
+            "行吗",
+            "吧",
+            "哈",
+            "呀",
+            "啊",
+            "啦",
+            "呢",
+            "哦",
+        ]
+        out = text
+        changed = True
+        while changed and out:
+            changed = False
+            out = out.rstrip("!！。?？~～,，;； ")
+            for token in tail_tokens:
+                if out.endswith(token):
+                    out = out[: -len(token)]
+                    changed = True
+                    break
+        return out.rstrip("!！。?？~～,，;； ")
 
     def _match_intent(self, command: str) -> tuple[Optional[str], float]:
         best_intent: Optional[str] = None
@@ -409,11 +452,27 @@ class CommandRouter:
         intent: Optional[str],
         score: float,
         entities: Dict[str, Any],
+        command: str,
     ) -> tuple[Optional[str], float]:
         unit = entities.get("unit")
         count = entities.get("count")
+        looks_query = self._looks_like_query(command)
+        looks_produce = self._looks_like_produce(command)
+        looks_stop_attack = self._looks_like_stop_attack(command)
 
-        if unit and intent is None:
+        if looks_stop_attack:
+            return "stop_attack", max(score, 0.90)
+
+        if looks_query and unit:
+            if intent in (None, "produce"):
+                return "query_actor", max(score, 0.82)
+            if intent == "query_actor":
+                return intent, min(1.0, score + 0.1)
+
+        if looks_produce and intent == "query_actor":
+            return "produce", max(score, 0.82)
+
+        if unit and intent is None and not looks_query:
             return "produce", max(score, 0.7)
 
         if intent == "produce" and unit:
@@ -422,7 +481,37 @@ class CommandRouter:
                 bonus += 0.05
             return intent, min(1.0, score + bonus)
 
+        if intent == "query_actor" and unit:
+            return intent, min(1.0, score + 0.1)
+
         return intent, score
+
+    @staticmethod
+    def _looks_like_query(command: str) -> bool:
+        return bool(
+            re.search(
+                r"(查询|查看|列出|查下|看下|看看|查兵|查单位|有多少|多少|几辆|几只|几架|兵力)",
+                command,
+            )
+        )
+
+    @staticmethod
+    def _looks_like_produce(command: str) -> bool:
+        return bool(
+            re.search(
+                r"(建造|生产|训练|制造|造|补(?!给)|爆兵|出兵|起兵|来一个|来一辆|搞一个|整一个)",
+                command,
+            )
+        )
+
+    @staticmethod
+    def _looks_like_stop_attack(command: str) -> bool:
+        return bool(
+            re.search(
+                r"(停火|停止(?:攻击|进攻|开火|作战|行动)|取消(?:攻击|进攻)|别攻击|不要攻击|先停手|停一停)",
+                command,
+            )
+        )
 
     @staticmethod
     def _similarity(a: str, b: str) -> float:
@@ -452,6 +541,8 @@ class CommandRouter:
             return self._extract_produce_entities(command)
         if intent == "attack":
             return self._extract_attack_entities(command)
+        if intent == "stop_attack":
+            return self._extract_stop_attack_entities(command)
         return self._extract_common_entities(command)
 
     def _extract_common_entities(self, command: str) -> Dict[str, Any]:
@@ -541,12 +632,29 @@ class CommandRouter:
 
         return entities
 
+    def _extract_stop_attack_entities(self, command: str) -> Dict[str, Any]:
+        entities = self._extract_common_entities(command)
+        entities["faction"] = "己方"
+        if "target_faction" not in entities:
+            entities["target_faction"] = "敌方"
+        return entities
+
     def _split_attack_segments(self, command: str) -> tuple[str, str]:
         patterns = [
             r"用(?P<attacker>.+?)攻击(?P<target>.+)",
             r"用(?P<attacker>.+?)打(?P<target>.+)",
             r"让(?P<attacker>.+?)攻击(?P<target>.+)",
+            r"让(?P<attacker>.+?)进攻(?P<target>.+)",
+            r"让(?P<attacker>.+?)突袭(?P<target>.+)",
+            r"派(?P<attacker>.+?)攻击(?P<target>.+)",
+            r"派(?P<attacker>.+?)进攻(?P<target>.+)",
+            r"派(?P<attacker>.+?)突袭(?P<target>.+)",
+            r"命令(?P<attacker>.+?)攻击(?P<target>.+)",
+            r"命令(?P<attacker>.+?)进攻(?P<target>.+)",
+            r"(?P<attacker>.+?)进攻(?P<target>.+)",
+            r"(?P<attacker>.+?)突袭(?P<target>.+)",
             r"(?P<attacker>.+?)打(?P<target>.+)",
+            r"(?P<attacker>.+?)集火(?P<target>.+)",
         ]
         for pattern in patterns:
             match = re.search(pattern, command)
@@ -560,7 +668,9 @@ class CommandRouter:
         for part in parts:
             clause = self._strip_sequence_prefixes(part)
             clause = self._strip_fillers(clause)
-            if clause:
+            clause = self._strip_polite_tail(clause)
+            clause = clause.strip("!！。?？~～,，;； ")
+            if clause and not self._is_non_semantic_clause(clause):
                 cleaned.append(clause)
 
         if len(cleaned) >= 2:
@@ -568,8 +678,17 @@ class CommandRouter:
         return [command]
 
     @staticmethod
+    def _is_non_semantic_clause(text: str) -> bool:
+        return bool(
+            re.fullmatch(
+                r"(快点|赶紧|立刻|马上|尽快|谢谢你?|辛苦了?|好的|好|吧|呀|啊|哈|啦|呢|哦)+",
+                text,
+            )
+        )
+
+    @staticmethod
     def _strip_sequence_prefixes(text: str) -> str:
-        prefixes = ["先", "然后", "再", "接着", "随后", "之后", "并且"]
+        prefixes = ["先", "然后", "再", "接着", "随后", "之后", "并且", "并"]
         output = text
         changed = True
         while changed:
@@ -683,6 +802,22 @@ class CommandRouter:
                 range_=entities.get("range") or "screen",
             )
             return Template(template).safe_substitute(attackers=attackers, targets=targets).strip()
+
+        if intent == "stop_attack":
+            units = self._build_targets_expr(
+                type_list=self._list_or_none(entities.get("attacker_type") or entities.get("unit")),
+                faction=entities.get("faction") or "己方",
+                range_=entities.get("range") or "selected",
+            )
+            fallback_units = self._build_targets_expr(
+                type_list=self._list_or_none(entities.get("attacker_type") or entities.get("unit")),
+                faction=entities.get("faction") or "己方",
+                range_="all",
+            )
+            return Template(template).safe_substitute(
+                units=units,
+                fallback_units=fallback_units,
+            ).strip()
 
         if intent == "explore":
             units = self._build_targets_expr(
