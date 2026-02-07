@@ -10,11 +10,14 @@ from typing import Any, Dict, Optional
 
 from ..config.command_dict import (
     COMMAND_DICT,
+    COUNT_CLASSIFIERS,
     DEFAULT_COMMAND_TEMPLATE_DIR,
     DIRECTION_ALIASES,
     ENTITY_ALIASES,
     FACTION_ALIASES,
+    PRODUCE_SEPARATORS,
     RANGE_ALIASES,
+    SEQUENCE_CONNECTORS,
 )
 from ..utils import LogManager
 
@@ -41,6 +44,16 @@ class RouteResult:
     entities: Optional[Dict[str, Any]] = None
 
 
+@dataclass(frozen=True)
+class ClauseRouteResult:
+    matched: bool
+    intent: Optional[str] = None
+    score: float = 0.0
+    reason: str = ""
+    entities: Optional[Dict[str, Any]] = None
+    step_code: str = ""
+
+
 class CommandRouter:
     """Lightweight rule-based command router with optional similarity matching."""
 
@@ -64,8 +77,10 @@ class CommandRouter:
         self.direction_aliases = direction_aliases or DIRECTION_ALIASES
         self.faction_aliases = faction_aliases or FACTION_ALIASES
         self.range_aliases = range_aliases or RANGE_ALIASES
+
         self.template_dir = self._resolve_template_dir(template_dir, dict_path)
-        self._template_map = self._load_templates()
+        self._step_template_map = self._load_step_templates()
+        self._wrapper_template_map = self._load_wrapper_templates()
 
         self._entity_alias_map = self._build_alias_map(self.entity_aliases)
         self._direction_alias_map = self._build_alias_map(self.direction_aliases)
@@ -85,15 +100,124 @@ class CommandRouter:
         if not normalized:
             return RouteResult(matched=False, reason="empty_command")
 
-        entities_hint = self._extract_common_entities(normalized)
+        clauses = self._split_sequence_clauses(normalized)
+        if len(clauses) >= 2:
+            return self._route_sequence(clauses)
 
-        intent, score = self._match_intent(normalized)
+        single_result = self._route_single_clause(normalized, for_sequence=False)
+        if not single_result.matched:
+            return RouteResult(
+                matched=False,
+                intent=single_result.intent,
+                score=single_result.score,
+                reason=single_result.reason,
+                entities=single_result.entities,
+            )
+
+        code = self._render_single_wrapper(single_result.step_code, single_result.intent)
+        if not code:
+            return RouteResult(
+                matched=False,
+                intent=single_result.intent,
+                score=single_result.score,
+                reason="wrapper_missing",
+                entities=single_result.entities,
+            )
+
+        return RouteResult(
+            matched=True,
+            intent=single_result.intent,
+            score=single_result.score,
+            code=code,
+            reason="matched",
+            entities=single_result.entities,
+        )
+
+    def _route_sequence(self, clauses: list[str]) -> RouteResult:
+        if len(clauses) > 6:
+            return RouteResult(
+                matched=False,
+                intent="composite_sequence",
+                reason="sequence_too_long",
+                entities={"clauses": clauses, "step_count": len(clauses)},
+            )
+
+        step_codes: list[str] = []
+        step_intents: list[str] = []
+        step_scores: list[float] = []
+        step_entities: list[Dict[str, Any]] = []
+
+        for idx, clause in enumerate(clauses, start=1):
+            result = self._route_single_clause(clause, for_sequence=True)
+            if not result.matched:
+                return RouteResult(
+                    matched=False,
+                    intent="composite_sequence",
+                    score=result.score,
+                    reason=f"sequence_clause_failed_{idx}:{result.reason}",
+                    entities={
+                        "clauses": clauses,
+                        "failed_index": idx,
+                        "failed_clause": clause,
+                        "failed_intent": result.intent,
+                        "step_count": len(clauses),
+                    },
+                )
+
+            if not result.intent:
+                return RouteResult(
+                    matched=False,
+                    intent="composite_sequence",
+                    reason=f"sequence_clause_failed_{idx}:no_intent",
+                    entities={"clauses": clauses, "failed_index": idx, "step_count": len(clauses)},
+                )
+
+            step_codes.append(result.step_code)
+            step_intents.append(result.intent)
+            step_scores.append(result.score)
+            step_entities.append(result.entities or {})
+
+        code = self._render_sequence_wrapper(step_codes, step_intents, clauses)
+        if not code:
+            return RouteResult(
+                matched=False,
+                intent="composite_sequence",
+                reason="wrapper_missing",
+                entities={"clauses": clauses, "step_count": len(clauses)},
+            )
+
+        score = min(step_scores) if step_scores else 0.0
+        return RouteResult(
+            matched=True,
+            intent="composite_sequence",
+            score=score,
+            code=code,
+            reason="matched",
+            entities={
+                "clauses": clauses,
+                "step_intents": step_intents,
+                "step_scores": step_scores,
+                "step_entities": step_entities,
+                "step_count": len(clauses),
+            },
+        )
+
+    def _route_single_clause(self, clause: str, *, for_sequence: bool) -> ClauseRouteResult:
+        entities_hint = self._extract_common_entities(clause)
+
+        intent, score = self._match_intent(clause)
         intent, score = self._apply_entity_heuristics(intent, score, entities_hint)
         if not intent:
-            return RouteResult(matched=False, reason="no_intent", entities=entities_hint)
-        threshold = self._adaptive_threshold(normalized, score)
+            return ClauseRouteResult(
+                matched=False,
+                score=score,
+                reason="no_intent",
+                entities=entities_hint,
+            )
+
+        threshold = self._adaptive_threshold(clause, score)
         if score < threshold:
-            return RouteResult(
+            return ClauseRouteResult(
                 matched=False,
                 intent=intent,
                 score=score,
@@ -101,10 +225,20 @@ class CommandRouter:
                 entities=entities_hint,
             )
 
-        entities = self._extract_entities(normalized, intent)
-        template = self._template_map.get(intent)
-        if template is None:
-            return RouteResult(
+        rule = self.command_dict.get(intent, {})
+        if for_sequence and not bool(rule.get("allow_in_sequence", True)):
+            return ClauseRouteResult(
+                matched=False,
+                intent=intent,
+                score=score,
+                reason="intent_not_allowed_in_sequence",
+                entities=entities_hint,
+            )
+
+        entities = self._extract_entities(clause, intent)
+        step_template = self._step_template_map.get(intent)
+        if step_template is None:
+            return ClauseRouteResult(
                 matched=False,
                 intent=intent,
                 score=score,
@@ -112,8 +246,8 @@ class CommandRouter:
                 entities=entities,
             )
 
-        if not template.strip():
-            return RouteResult(
+        if not step_template.strip():
+            return ClauseRouteResult(
                 matched=False,
                 intent=intent,
                 score=score,
@@ -121,9 +255,9 @@ class CommandRouter:
                 entities=entities,
             )
 
-        code = self._render_template(intent, template, entities)
-        if not code:
-            return RouteResult(
+        step_code = self._render_step_template(intent, step_template, entities)
+        if not step_code:
+            return ClauseRouteResult(
                 matched=False,
                 intent=intent,
                 score=score,
@@ -131,13 +265,13 @@ class CommandRouter:
                 entities=entities,
             )
 
-        return RouteResult(
+        return ClauseRouteResult(
             matched=True,
             intent=intent,
             score=score,
-            code=code,
             reason="matched",
             entities=entities,
+            step_code=step_code,
         )
 
     def _load_dict(self, dict_path: Optional[str]) -> Optional[Dict[str, Dict[str, Any]]]:
@@ -163,22 +297,27 @@ class CommandRouter:
             return Path(dict_path).parent / DEFAULT_COMMAND_TEMPLATE_DIR
         return Path(__file__).resolve().parents[1] / DEFAULT_COMMAND_TEMPLATE_DIR
 
-    def _load_templates(self) -> Dict[str, Optional[str]]:
+    def _load_step_templates(self) -> Dict[str, Optional[str]]:
         template_map: Dict[str, Optional[str]] = {}
         for intent, rule in self.command_dict.items():
-            template_path = self._resolve_template_path(intent, rule)
+            template_path = self._resolve_template_path(
+                intent=intent,
+                rule=rule,
+                template_field="step_template_file",
+                default_relative=f"steps/{intent}.py.tmpl",
+            )
             try:
                 template_map[intent] = template_path.read_text(encoding="utf-8")
             except FileNotFoundError:
                 logger.warning(
-                    "CommandRouter: template not found for intent=%s path=%s",
+                    "CommandRouter: step template not found for intent=%s path=%s",
                     intent,
                     template_path,
                 )
                 template_map[intent] = None
             except Exception as e:
                 logger.warning(
-                    "CommandRouter: failed to load template intent=%s path=%s err=%s",
+                    "CommandRouter: failed to load step template intent=%s path=%s err=%s",
                     intent,
                     template_path,
                     e,
@@ -186,14 +325,43 @@ class CommandRouter:
                 template_map[intent] = None
         return template_map
 
-    def _resolve_template_path(self, intent: str, rule: Dict[str, Any]) -> Path:
-        template_file = rule.get("template_file")
+    def _load_wrapper_templates(self) -> Dict[str, Optional[str]]:
+        wrappers = {
+            "single_action": self.template_dir / "wrappers" / "single_action.py.tmpl",
+            "sequence_action": self.template_dir / "wrappers" / "sequence_action.py.tmpl",
+        }
+        loaded: Dict[str, Optional[str]] = {}
+        for key, path in wrappers.items():
+            try:
+                loaded[key] = path.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                logger.warning("CommandRouter: wrapper template not found key=%s path=%s", key, path)
+                loaded[key] = None
+            except Exception as e:
+                logger.warning(
+                    "CommandRouter: failed to load wrapper template key=%s path=%s err=%s",
+                    key,
+                    path,
+                    e,
+                )
+                loaded[key] = None
+        return loaded
+
+    def _resolve_template_path(
+        self,
+        *,
+        intent: str,
+        rule: Dict[str, Any],
+        template_field: str,
+        default_relative: str,
+    ) -> Path:
+        template_file = rule.get(template_field)
         if template_file:
             candidate = Path(str(template_file))
             if candidate.is_absolute():
                 return candidate
             return self.template_dir / candidate
-        return self.template_dir / f"{intent}.py.tmpl"
+        return self.template_dir / default_relative
 
     def _normalize(self, text: str) -> str:
         text = (text or "").strip().lower()
@@ -264,13 +432,12 @@ class CommandRouter:
             return fuzz.token_set_ratio(a, b) / 100.0
         return SequenceMatcher(None, a, b).ratio()
 
-    @staticmethod
-    def _adaptive_threshold(command: str, score: float) -> float:
+    def _adaptive_threshold(self, command: str, score: float) -> float:
         if len(command) <= 4 and score >= 0.5:
             return 0.5
         if len(command) <= 6 and score >= 0.6:
             return 0.6
-        return 0.72
+        return self.similarity_threshold
 
     @staticmethod
     def _build_alias_map(alias_groups: Dict[str, list[str]]) -> Dict[str, str]:
@@ -281,6 +448,8 @@ class CommandRouter:
         return alias_map
 
     def _extract_entities(self, command: str, intent: str) -> Dict[str, Any]:
+        if intent == "produce":
+            return self._extract_produce_entities(command)
         if intent == "attack":
             return self._extract_attack_entities(command)
         return self._extract_common_entities(command)
@@ -312,14 +481,48 @@ class CommandRouter:
         if actor_id is not None:
             entities["actor_id"] = actor_id
 
-        # count
         count = self._extract_count(command)
-        if count:
-            entities["count"] = count
-        else:
-            entities["count"] = 1
+        entities["count"] = count or 1
 
         return entities
+
+    def _extract_produce_entities(self, command: str) -> Dict[str, Any]:
+        entities = self._extract_common_entities(command)
+        items = self._extract_production_items(command)
+
+        if items:
+            entities["production_items"] = items
+            entities["unit"] = items[0]["unit"]
+            entities["count"] = items[0]["count"]
+        elif entities.get("unit"):
+            entities["production_items"] = [
+                {
+                    "unit": entities["unit"],
+                    "count": entities.get("count") or 1,
+                }
+            ]
+
+        return entities
+
+    def _extract_production_items(self, command: str) -> list[Dict[str, Any]]:
+        segments = self._split_by_keywords(command, PRODUCE_SEPARATORS)
+        if not segments:
+            segments = [command]
+
+        items: list[Dict[str, Any]] = []
+        for segment in segments:
+            unit = self._match_alias(segment, self._entity_alias_map, self._entity_kp)
+            if not unit:
+                continue
+            count = self._extract_count(segment) or 1
+            items.append({"unit": unit, "count": count})
+
+        if not items:
+            unit = self._match_alias(command, self._entity_alias_map, self._entity_kp)
+            if unit:
+                items.append({"unit": unit, "count": self._extract_count(command) or 1})
+
+        return items
 
     def _extract_attack_entities(self, command: str) -> Dict[str, Any]:
         entities = self._extract_common_entities(command)
@@ -343,12 +546,49 @@ class CommandRouter:
             r"用(?P<attacker>.+?)攻击(?P<target>.+)",
             r"用(?P<attacker>.+?)打(?P<target>.+)",
             r"让(?P<attacker>.+?)攻击(?P<target>.+)",
+            r"(?P<attacker>.+?)打(?P<target>.+)",
         ]
         for pattern in patterns:
             match = re.search(pattern, command)
             if match:
                 return match.group("attacker"), match.group("target")
         return command, command
+
+    def _split_sequence_clauses(self, command: str) -> list[str]:
+        parts = self._split_by_keywords(command, SEQUENCE_CONNECTORS)
+        cleaned: list[str] = []
+        for part in parts:
+            clause = self._strip_sequence_prefixes(part)
+            clause = self._strip_fillers(clause)
+            if clause:
+                cleaned.append(clause)
+
+        if len(cleaned) >= 2:
+            return cleaned
+        return [command]
+
+    @staticmethod
+    def _strip_sequence_prefixes(text: str) -> str:
+        prefixes = ["先", "然后", "再", "接着", "随后", "之后", "并且"]
+        output = text
+        changed = True
+        while changed:
+            changed = False
+            for prefix in prefixes:
+                if output.startswith(prefix):
+                    output = output[len(prefix) :]
+                    changed = True
+        return output
+
+    @staticmethod
+    def _split_by_keywords(text: str, keywords: list[str]) -> list[str]:
+        escaped = [re.escape(x) for x in sorted(set(keywords), key=len, reverse=True) if x]
+        if not escaped:
+            return [text]
+
+        pattern = r"(?:" + "|".join(escaped) + r")"
+        parts = [p for p in re.split(pattern, text) if p]
+        return parts
 
     def _match_alias(
         self,
@@ -398,29 +638,38 @@ class CommandRouter:
             return None
 
     def _extract_count(self, command: str) -> Optional[int]:
-        digit_match = re.search(r"(\d+)", command)
+        classifier_pattern = "|".join(re.escape(x) for x in COUNT_CLASSIFIERS)
+
+        digit_match = re.search(rf"(?<![a-zA-Z])(\d+)\s*(?:{classifier_pattern})?", command)
         if digit_match:
             try:
                 return int(digit_match.group(1))
             except ValueError:
                 pass
 
-        chinese_match = re.search(r"([一二三四五六七八九十两]+)", command)
+        chinese_match = re.search(
+            rf"([一二三四五六七八九十两]+)\s*(?:{classifier_pattern})?",
+            command,
+        )
         if not chinese_match:
             return None
 
         return self._parse_chinese_number(chinese_match.group(1))
 
-    def _render_template(self, intent: str, template: str, entities: Dict[str, Any]) -> Optional[str]:
+    def _render_step_template(self, intent: str, template: str, entities: Dict[str, Any]) -> Optional[str]:
         if not template:
             return None
 
         if intent == "produce":
-            unit = entities.get("unit")
-            count = entities.get("count")
-            if not unit:
+            items = entities.get("production_items") or []
+            produce_items_code = self._build_production_items_code(items)
+            if not produce_items_code:
                 return None
-            return Template(template).safe_substitute(unit=unit, count=count or 1).strip()
+            return Template(template).safe_substitute(
+                unit=entities.get("unit", ""),
+                count=entities.get("count", 1),
+                production_items_code=produce_items_code,
+            ).strip()
 
         if intent == "attack":
             attackers = self._build_targets_expr(
@@ -462,6 +711,71 @@ class CommandRouter:
             return Template(template).safe_substitute(targets=targets).strip()
 
         return Template(template).safe_substitute(**entities).strip()
+
+    def _build_production_items_code(self, items: list[Dict[str, Any]]) -> str:
+        lines: list[str] = []
+
+        for item in items:
+            unit = item.get("unit")
+            if not unit:
+                continue
+
+            count_raw = item.get("count")
+            try:
+                count = int(count_raw)
+            except (TypeError, ValueError):
+                count = 1
+            if count < 1:
+                count = 1
+
+            lines.append(f"if not api.ensure_can_produce_unit({unit!r}):")
+            lines.append(f"    raise RuntimeError('不能生产{unit}：前置不足或失败')")
+            lines.append(f"api.produce_wait({unit!r}, {count}, auto_place_building=True)")
+            lines.append(f"logger.info('生产了{count}个{unit}')")
+            lines.append(f"_step_messages.append('已生产{count}个{unit}')")
+
+        return "\n".join(lines).strip()
+
+    def _render_single_wrapper(self, step_code: str, intent: Optional[str]) -> Optional[str]:
+        wrapper = self._wrapper_template_map.get("single_action")
+        if not wrapper:
+            return None
+
+        return Template(wrapper).safe_substitute(
+            intent=intent or "",
+            step_code=self._indent_code(step_code, spaces=4),
+        ).strip()
+
+    def _render_sequence_wrapper(
+        self,
+        step_codes: list[str],
+        step_intents: list[str],
+        clauses: list[str],
+    ) -> Optional[str]:
+        wrapper = self._wrapper_template_map.get("sequence_action")
+        if not wrapper:
+            return None
+
+        blocks: list[str] = []
+        for idx, (step_code, step_intent, clause) in enumerate(
+            zip(step_codes, step_intents, clauses), start=1
+        ):
+            block = "\n".join(
+                [
+                    f"_current_step = {idx}",
+                    f"_current_intent = {step_intent!r}",
+                    f"_current_clause = {clause!r}",
+                    step_code,
+                ]
+            )
+            blocks.append(self._indent_code(block, spaces=4))
+
+        return Template(wrapper).safe_substitute(step_blocks="\n\n".join(blocks)).strip()
+
+    @staticmethod
+    def _indent_code(code: str, *, spaces: int) -> str:
+        prefix = " " * spaces
+        return "\n".join(prefix + line if line else line for line in code.splitlines())
 
     @staticmethod
     def _list_or_none(value: Optional[str]) -> Optional[list[str]]:

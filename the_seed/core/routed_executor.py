@@ -29,6 +29,17 @@ class RoutedExecutor:
 
         route_result = self._try_route(command)
         if route_result.matched and route_result.code:
+            if route_result.intent == "composite_sequence":
+                step_count = 0
+                clauses = []
+                if route_result.entities:
+                    step_count = int(route_result.entities.get("step_count") or 0)
+                    clauses = route_result.entities.get("clauses") or []
+                logger.info(
+                    "RoutedExecutor: composite route steps=%d clauses=%s",
+                    step_count,
+                    clauses,
+                )
             logger.info(
                 "RoutedExecutor: routed intent=%s score=%.3f",
                 route_result.intent,
