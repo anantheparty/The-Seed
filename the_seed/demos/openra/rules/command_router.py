@@ -461,9 +461,13 @@ class CommandRouter:
         looks_expand_mine = self._looks_like_expand_mine(command)
         looks_implicit_produce = self._looks_like_implicit_produce(command, unit)
         looks_stop_attack = self._looks_like_stop_attack(command)
+        looks_global_attack = self._looks_like_global_attack(command)
 
         if looks_stop_attack:
             return "stop_attack", max(score, 0.90)
+
+        if looks_global_attack:
+            return "attack", max(score, 0.90)
 
         if looks_expand_mine:
             return "produce", max(score, 0.92)
@@ -553,6 +557,15 @@ class CommandRouter:
         return bool(
             re.search(
                 r"(停火|停止(?:攻击|进攻|开火|作战|行动)|取消(?:攻击|进攻)|别攻击|不要攻击|先停手|停一停)",
+                command,
+            )
+        )
+
+    @staticmethod
+    def _looks_like_global_attack(command: str) -> bool:
+        return bool(
+            re.search(
+                r"(全面(?:进攻|攻击)|全军出击|总攻|总进攻|全线进攻|反攻|压上去|打过去|推过去)",
                 command,
             )
         )
@@ -707,6 +720,12 @@ class CommandRouter:
 
         if "敌" in command and "target_faction" not in entities:
             entities["target_faction"] = "敌方"
+
+        if self._looks_like_global_attack(command):
+            entities["global_attack"] = True
+            entities["faction"] = "己方"
+            entities["target_faction"] = "敌方"
+            entities["range"] = "all"
 
         return entities
 
@@ -892,7 +911,11 @@ class CommandRouter:
                 faction=entities.get("target_faction") or entities.get("faction") or "敌方",
                 range_=entities.get("range") or "screen",
             )
-            return Template(template).safe_substitute(attackers=attackers, targets=targets).strip()
+            return Template(template).safe_substitute(
+                attackers=attackers,
+                targets=targets,
+                global_attack=str(bool(entities.get("global_attack"))),
+            ).strip()
 
         if intent == "stop_attack":
             units = self._build_targets_expr(
