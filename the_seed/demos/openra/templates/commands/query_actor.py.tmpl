@@ -1,7 +1,17 @@
 try:
     _step_messages = []
     actors = api.query_actor($targets)
-    _step_messages.append(f"查询完成，匹配到{len(actors)}个单位")
+    if not actors:
+        msg = "查询完成，未匹配到单位"
+    else:
+        counter = {}
+        for a in actors:
+            t = str(getattr(a, "type", None) or getattr(a, "unit_type", None) or "未知")
+            counter[t] = counter.get(t, 0) + 1
+        top = sorted(counter.items(), key=lambda kv: (-kv[1], kv[0]))[:6]
+        dist = "、".join(f"{k}x{v}" for k, v in top)
+        msg = f"查询完成，共{len(actors)}个单位。类型分布：{dist}"
+    _step_messages.append(msg)
     __result__ = {
         "success": True,
         "message": _step_messages[-1],

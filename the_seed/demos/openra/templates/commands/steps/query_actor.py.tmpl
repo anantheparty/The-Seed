@@ -1,3 +1,52 @@
 actors = api.query_actor($targets)
-logger.info("查询完成，actor_count=%s", len(actors))
-_step_messages.append(f"查询完成，匹配到{len(actors)}个单位")
+status_query = $status_query
+has_query_filter = $has_query_filter
+
+def _actor_type(a):
+    t = getattr(a, "type", None)
+    if not t:
+        t = getattr(a, "unit_type", None)
+    return str(t or "未知")
+
+def _count_by_type(actor_list):
+    out = {}
+    for a in actor_list:
+        k = _actor_type(a)
+        out[k] = out.get(k, 0) + 1
+    return out
+
+def _fmt_top(counter, limit=6):
+    if not counter:
+        return "无"
+    items = sorted(counter.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]
+    return "、".join(f"{k}x{v}" for k, v in items)
+
+actor_count = len(actors)
+logger.info("查询完成，actor_count=%s status_query=%s", actor_count, status_query)
+
+if status_query:
+    my_actors = api.query_actor(TargetsQueryParam(faction="己方", range="all"))
+    enemy_actors = api.query_actor(TargetsQueryParam(faction="敌方", range="all"))
+    my_counter = _count_by_type(my_actors)
+    enemy_counter = _count_by_type(enemy_actors)
+
+    base = api.player_base_info()
+    cash = int(getattr(base, "Cash", 0) or 0)
+    resources = int(getattr(base, "Resources", 0) or 0)
+    power_provided = int(getattr(base, "PowerProvided", 0) or 0)
+    power_drained = int(getattr(base, "PowerDrained", 0) or 0)
+    power_surplus = power_provided - power_drained
+
+    _step_messages.append(
+        f"状态概览：资金{cash}+资源{resources}；电力盈余{power_surplus}（供{power_provided}/耗{power_drained}）。"
+        f"我方单位{len(my_actors)}，敌方可见单位{len(enemy_actors)}。"
+        f"我方主力：{_fmt_top(my_counter)}；敌方可见：{_fmt_top(enemy_counter)}。"
+    )
+elif actor_count <= 0:
+    _step_messages.append("查询完成，未匹配到单位")
+else:
+    top = _fmt_top(_count_by_type(actors))
+    if has_query_filter:
+        _step_messages.append(f"查询完成，共{actor_count}个单位：{top}")
+    else:
+        _step_messages.append(f"查询完成，共{actor_count}个单位。类型分布：{top}")

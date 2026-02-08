@@ -498,7 +498,16 @@ class CommandRouter:
     def _looks_like_query(command: str) -> bool:
         return bool(
             re.search(
-                r"(查询|查看|列出|查下|看下|看看|查兵|查单位|有多少|多少|几辆|几只|几架|兵力)",
+                r"(查询|查看|列出|查下|看下|看看|查兵|查单位|有多少|多少|几辆|几只|几架|兵力|状态|战况|局势|概况|情况)",
+                command,
+            )
+        )
+
+    @staticmethod
+    def _looks_like_status_query(command: str) -> bool:
+        return bool(
+            re.search(
+                r"(状态|战况|局势|概况|战场情况|当前情况|目前情况|资源情况|电力情况|兵力情况)",
                 command,
             )
         )
@@ -531,7 +540,7 @@ class CommandRouter:
             return False
         if re.search(r"(侦察|侦查|探索|探路|探图|开图)", command):
             return False
-        if re.search(r"(查询|查看|列出|查下|看下|看看|有多少|多少|几辆|几只|几架|兵力)", command):
+        if re.search(r"(查询|查看|列出|查下|看下|看看|有多少|多少|几辆|几只|几架|兵力|状态|战况|局势|概况|情况)", command):
             return False
         if re.search(r"(攻击|进攻|突袭|集火|停火|停止攻击|停止进攻|取消攻击)", command):
             return False
@@ -578,6 +587,8 @@ class CommandRouter:
             return self._extract_attack_entities(command)
         if intent == "stop_attack":
             return self._extract_stop_attack_entities(command)
+        if intent == "query_actor":
+            return self._extract_query_entities(command)
         return self._extract_common_entities(command)
 
     def _extract_common_entities(self, command: str) -> Dict[str, Any]:
@@ -704,6 +715,19 @@ class CommandRouter:
         entities["faction"] = "己方"
         if "target_faction" not in entities:
             entities["target_faction"] = "敌方"
+        return entities
+
+    def _extract_query_entities(self, command: str) -> Dict[str, Any]:
+        entities = self._extract_common_entities(command)
+        status_query = self._looks_like_status_query(command)
+        if status_query:
+            entities["status_query"] = True
+            # "看下状态/查下状态"里的“下”经常被误判成方向“南”。
+            if entities.get("direction") == "南" and re.search(
+                r"(看下|查下|看一下|查一下|看一眼|查一查|看一看)",
+                command,
+            ):
+                entities.pop("direction", None)
         return entities
 
     def _split_attack_segments(self, command: str) -> tuple[str, str]:
@@ -910,7 +934,15 @@ class CommandRouter:
                 group_id=entities.get("group_id"),
                 actor_id=entities.get("actor_id"),
             )
-            return Template(template).safe_substitute(targets=targets).strip()
+            has_query_filter = any(
+                entities.get(k) is not None and entities.get(k) != ""
+                for k in ("unit", "faction", "group_id", "actor_id", "direction")
+            )
+            return Template(template).safe_substitute(
+                targets=targets,
+                status_query=str(bool(entities.get("status_query"))),
+                has_query_filter=str(bool(has_query_filter)),
+            ).strip()
 
         return Template(template).safe_substitute(**entities).strip()
 
