@@ -42,6 +42,7 @@ COUNT_CLASSIFIERS = [
 COMMAND_DICT = {
     "deploy_mcv": {
         "synonyms": [
+            "展开",
             "展开基地车",
             "部署基地车",
             "展开基地",
