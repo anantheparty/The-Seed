@@ -9,17 +9,19 @@ targets = api.query_actor($targets)
 if not attackers:
     raise RuntimeError("未找到攻击者")
 if not targets:
-    raise RuntimeError("未找到攻击目标")
-
-target = targets[0]
-if global_attack:
-    # 全面进攻优先打高价值建筑；找不到再打第一个可见目标。
-    priority = {"建造厂": 0, "矿场": 1, "战车工厂": 2, "雷达站": 3, "兵营": 4}
-    target = min(
-        targets,
-        key=lambda a: priority.get(str(getattr(a, "type", "") or ""), 999),
-    )
-
-api.dispatch_attack(attackers, target)
+    if global_attack:
+        api.dispatch_attack(attackers)
+    else:
+        raise RuntimeError("未找到攻击目标")
+else:
+    target = targets[0]
+    if global_attack:
+        # 全面进攻优先打高价值建筑；找不到再打第一个可见目标。
+        priority = {"建造厂": 0, "矿场": 1, "战车工厂": 2, "雷达站": 3, "兵营": 4}
+        target = min(
+            targets,
+            key=lambda a: priority.get(str(getattr(a, "type", "") or ""), 999),
+        )
+    api.dispatch_attack(attackers, target)
 logger.info("已下达攻击指令")
 _step_messages.append("已下达攻击指令")

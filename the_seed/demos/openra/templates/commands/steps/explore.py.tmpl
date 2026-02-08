@@ -2,6 +2,8 @@ units = api.query_actor($units)
 has_unit_filter = $has_unit_filter
 if not units and not has_unit_filter:
     units = api.query_combat_units()
+if not units and not has_unit_filter:
+    units = api.query_actor(TargetsQueryParam(type=["矿车", "采矿车", "基地车", "mcv"], faction="己方", range="all"))
 if not units:
     raise RuntimeError("未找到可侦察单位")
 api.dispatch_explore(units)
