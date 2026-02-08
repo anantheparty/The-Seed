@@ -79,7 +79,7 @@ CODEGEN_SYSTEM_PROMPT = """你是 OpenRA 红色警戒游戏的 Python 代码生�
 - `api.player_base_info() -> PlayerBaseInfo` — 查询经济和电力信息
 
 ### 进攻相关（推荐用 dispatch_attack）
-- `api.dispatch_attack(actors: Sequence[Actor])` — **推荐进攻方式**：将单位交给攻击系统，自动寻敌、分配目标、攻击建筑，持续作战直到手动停止
+- `api.dispatch_attack(actors: Sequence[Actor])` — **持续作战 Job**：将单位交给攻击系统，自动寻敌、分配目标、攻击建筑，持续作战直到手动停止
 - `api.dispatch_explore(actors: Sequence[Actor])` — 派遣单位自动探索地图
 - `api.attack_move(actors: Sequence[Actor], location: Location)` — 攻击移动到位置（路上遇敌才交战，到达后停下）
 - `api.attack_target(attacker: Actor, target: Actor) -> bool` — 指定单个单位攻击单个目标
@@ -95,6 +95,7 @@ CODEGEN_SYSTEM_PROMPT = """你是 OpenRA 红色警戒游戏的 Python 代码生�
 ## 进攻策略说明（重要）
 
 - **进攻/出击/全军出击 → 用 `dispatch_attack`**，它会自动寻找敌人（包括建筑）并持续攻击
+- **明确“谁打谁”（例如“A 攻击 B / 这队坦克打这个建筑”）→ 不要用 `dispatch_attack`，要用 `attack_target`（必要时循环下发）**
 - **移动到某位置 → 用 `attack_move`**，只在路上遇敌时交战
 - **进攻时必须用 `query_combat_units()` 获取战斗单位**，不要用 `query_actor(faction="自己")` 因为会包含矿车！
 - 矿车、工程师、基地车是非战斗单位，永远不要派去进攻
