@@ -939,7 +939,10 @@ class CommandRouter:
                 faction=entities.get("faction") or "己方",
                 range_=entities.get("range") or "selected",
             )
-            return Template(template).safe_substitute(units=units).strip()
+            return Template(template).safe_substitute(
+                units=units,
+                has_unit_filter=str(bool(entities.get("unit"))),
+            ).strip()
 
         if intent == "mine":
             harvesters = self._build_targets_expr(
